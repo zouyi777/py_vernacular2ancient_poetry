@@ -1,10 +1,10 @@
-from keras_seq2seq_english2chinese.net_model import net_model
-from keras_seq2seq_english2chinese.utils import pre_data_utils
-from common_dict import gen_com_dict
+from py_vernacular2ancient_poetry.net_model import net_model
+from py_vernacular2ancient_poetry.utils import pre_data_utils
+from py_common_dict import gen_com_dict
 from tensorflow import keras
 
 BATCH_SIZE = 256
-EPOCH = 500
+EPOCH = 200
 
 input_texts, target_texts= pre_data_utils.read_ancient_poetry()
 

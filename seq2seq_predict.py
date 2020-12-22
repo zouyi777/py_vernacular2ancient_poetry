@@ -1,7 +1,9 @@
-from keras_seq2seq_english2chinese.net_model import net_model
-from keras_seq2seq_english2chinese.utils import pre_data_utils
+from py_vernacular2ancient_poetry.net_model import net_model
+# from py_vernacular2ancient_poetry.net_model import net_model_bak as net_model
+from py_vernacular2ancient_poetry.utils import pre_data_utils
 import numpy as np
-from common_dict import gen_com_dict
+from py_common_dict import gen_com_dict
+import os
 
 # 读取原数据和目标数据
 input_texts, target_texts= pre_data_utils.read_ancient_poetry()
@@ -30,7 +32,7 @@ def sample(preds, temperature=1.0):
 # 预测
 def predict_chinese(source,encoder_inference, decoder_inference, n_steps, features):
     #先通过推理encoder获得预测输入序列的隐状态
-    _, enc_state_h, enc_state_c = encoder_inference.predict(source)
+    enc_outputs, enc_state_h, enc_state_c = encoder_inference.predict(source)
     state = [enc_state_h, enc_state_c]
     #第一个字符'\t',为起始标志
     predict_seq = np.array([[dict['\t']]])
@@ -39,7 +41,8 @@ def predict_chinese(source,encoder_inference, decoder_inference, n_steps, featur
     #每次循环用上次预测的字符作为输入来预测下一次的字符，直到预测出了终止符
     for i in range(n_steps):#n_steps为句子最大长度
         #给decoder输入上一个时刻的h,c隐状态，以及上一次的预测字符predict_seq
-        yhat,h,c = decoder_inference.predict([predict_seq]+state)
+        yhat,h,c = decoder_inference.predict([enc_outputs, predict_seq]+state)
+        # yhat,h,c = decoder_inference.predict([predict_seq]+state)
         #注意，这里的yhat为Dense之后输出的结果，因此与h不同
         char_index = np.argmax(yhat[0,-1,:])
         # char_index = sample(yhat[0,-1,:])
@@ -51,14 +54,28 @@ def predict_chinese(source,encoder_inference, decoder_inference, n_steps, featur
             break
     return output
 
-model_train = net_model.Seq2Seq(vocab_size)
-model_train.load_weights("model/ancient_poetry_weights.h5")
-encoder_infer = net_model.encoder_infer(model_train)
-decoder_infer = net_model.decoder_infer(model_train)
+def predict_ancient(texts):
+    # model_path = "model/ancient_poetry_weights_bak.h5"
+    model_path = "model/ancient_poetry_weights.h5"
+    realpath = os.path.realpath(model_path)
+    model_train = None
+    if model_train == None:
+        model_train = net_model.Seq2Seq(vocab_size)
+        model_train.load_weights(realpath)
+    encoder_infer =None
+    if encoder_infer == None:
+        encoder_infer = net_model.encoder_infer(model_train)
+    decoder_infer = None
+    if decoder_infer == None:
+        decoder_infer = net_model.decoder_infer(model_train,encoder_infer)
+        # decoder_infer = net_model.decoder_infer(model_train)
+    encoder_input = pre_data_utils.gen_sequence_without_onehot([texts], dict, INUPT_LENGTH)
+    out = predict_chinese(encoder_input, encoder_infer, decoder_infer, OUTPUT_LENGTH, vocab_size)
+    return out;
 
-texts = "屌爆了"
-encoder_input = pre_data_utils.gen_sequence_without_onehot([texts],dict,INUPT_LENGTH)
-out = predict_chinese(encoder_input,encoder_infer,decoder_infer,OUTPUT_LENGTH,vocab_size)
-print(texts)
-print(out)
+if __name__ == '__main__':
+    texts = "每时每刻"
+    out = predict_ancient(texts)
+    print(texts)
+    print(out)
 

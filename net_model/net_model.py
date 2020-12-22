@@ -1,5 +1,5 @@
 from tensorflow import keras
-from tensorflow.keras.layers import Flatten, Input, Embedding, LSTM, Dense, Attention
+from tensorflow.keras.layers import Flatten, Input, Embedding, LSTM, Dense, Attention,Concatenate
 from tensorflow.keras.models import Model
 
 N_UNITS = 128
@@ -53,7 +53,7 @@ class Encoder(keras.Model):
     def __init__(self, hidden_units, vocab_size, embedding_dim):
         super(Encoder, self).__init__()
         self.embedding = Embedding(vocab_size, embedding_dim, mask_zero=True)  # Embedding Layer
-        self.encoder_lstm = LSTM(hidden_units, return_state=True, name="encode_lstm")# Encode LSTM Layer
+        self.encoder_lstm = LSTM(hidden_units, return_sequences=True, return_state=True, name="encode_lstm")# Encode LSTM Layer
     def call(self, inputs):
         encoder_embed = self.embedding(inputs)
         outputs, state_h, state_c = self.encoder_lstm(encoder_embed)
@@ -64,10 +64,14 @@ class Decoder(keras.Model):
         super(Decoder, self).__init__()
         self.embedding = Embedding(vocab_size, embedding_dim, mask_zero=True)  # Embedding Layer
         self.decoder_lstm = LSTM(hidden_units, return_sequences=True, return_state=True, name="decode_lstm") # Decode LSTM Layer
-    def call(self,dec_inputs, init_state):
+        self.attention = Attention()  # Attention Layer
+        self.concatenate = Concatenate(axis=-1, name='concat_layer')  # Concatenate Layer
+    def call(self,enc_outputs,dec_inputs, init_state):
         decoder_embed = self.embedding(dec_inputs)
-        outputs, state_h, state_c = self.decoder_lstm(decoder_embed, initial_state=init_state)
-        return outputs, state_h, state_c
+        dec_outputs, state_h, state_c = self.decoder_lstm(decoder_embed, initial_state=init_state)
+        attention_output = self.attention([dec_outputs, enc_outputs])
+        concatenate_output = self.concatenate([dec_outputs, attention_output])  # 一定要把注意力输出和解码输出粘接起来
+        return concatenate_output, state_h, state_c
 # encoder和decoder模块合并，组成一个完整的seq2seq模型
 def Seq2Seq(vocab_size):
     # Input Layer
@@ -75,11 +79,11 @@ def Seq2Seq(vocab_size):
     decoder_inputs = Input(shape=(None, ), name="decode_input")
     # Encoder Layer
     encoder = Encoder(N_UNITS, vocab_size, embedding_dim)
-    _,enc_state_h, enc_state_c = encoder(encoder_inputs)
+    enc_outputs,enc_state_h, enc_state_c = encoder(encoder_inputs)
     enc_states = [enc_state_h, enc_state_c]
     # Decoder Layer
     decoder = Decoder(N_UNITS, vocab_size, embedding_dim)
-    dec_output, _, _ = decoder(decoder_inputs, enc_states)
+    dec_output, _, _ = decoder(enc_outputs,decoder_inputs, enc_states)
     # Dense Layer
     dense_outputs = Dense(vocab_size, activation='softmax', name="final_out_dense")(dec_output)
     # seq2seq model
@@ -93,20 +97,24 @@ def encoder_infer(model):
     encoder_model = Model(inputs=input_my,outputs=output_my)
     return encoder_model
 # 从seq2seq模型中获取Decoder子模块，这里没有直接从decoder层取，方便后续decoder的预测推断
-def decoder_infer(model):
+def decoder_infer(model,encoder_model):
+    encoder_output = encoder_model.get_layer('encoder').output[0]
+    maxlen, hidden_units = encoder_output.shape[1:]
+
     dec_input = model.get_layer('decode_input').input
+    enc_output = Input(shape=(maxlen, hidden_units), name='enc_output')
     input_state_h = Input(shape=(N_UNITS,))
     input_state_c = Input(shape=(N_UNITS,))
     dec_state_input = [input_state_h, input_state_c]  # 上个时刻的状态h,c
 
     decoder = model.get_layer('decoder')
-    dec_outputs, out_state_h, out_state_c = decoder(dec_input, dec_state_input)
+    dec_outputs, out_state_h, out_state_c = decoder(enc_output, dec_input, dec_state_input)
     dec_states_out = [out_state_h, out_state_c]
 
     final_out_dense = model.get_layer('final_out_dense')
     dense_output = final_out_dense(dec_outputs)
 
-    decoder_model = Model(inputs=[dec_input]+dec_state_input,
+    decoder_model = Model(inputs=[enc_output,dec_input]+dec_state_input,
                           outputs=[dense_output]+dec_states_out)
     return decoder_model
 
