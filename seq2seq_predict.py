@@ -4,7 +4,7 @@ from py_vernacular2ancient_poetry.utils import pre_data_utils
 import numpy as np
 from py_common_dict import gen_com_dict
 import os
-
+import heapq
 # 读取原数据和目标数据
 input_texts, target_texts= pre_data_utils.read_ancient_poetry()
 
@@ -54,6 +54,42 @@ def predict_chinese(source,encoder_inference, decoder_inference, n_steps, featur
             break
     return output
 
+# 预测均衡输出
+def infer_beam_search(source,encoder_inference, decoder_inference, n_steps, k=3):
+    # 先通过推理encoder获得预测输入序列的隐状态
+    enc_outputs, enc_state_h, enc_state_c = encoder_inference.predict(source)
+    enc_state_outputs = [enc_state_h, enc_state_c]
+
+    predict_seq = [[dict['\t']]]
+    states_curr = {0: enc_state_outputs}
+    seq_scores = [[predict_seq, 1.0, 0]]
+    resList = []
+    for _ in range(n_steps):
+        cands = list()
+        states_prev = states_curr
+        for i in range(len(seq_scores)):
+            seq, score, state_id = seq_scores[i]
+            dec_inputs = np.array(seq[-1:])
+            dec_states_inputs = states_prev[state_id]
+            # 解码器decoder预测输出
+            dense_outputs, dec_state_h, dec_state_c = decoder_inference.predict([enc_outputs, dec_inputs] + dec_states_inputs)
+            prob = dense_outputs[0][0]
+            states_curr[i] = [dec_state_h, dec_state_c]
+
+            k_prob = heapq.nlargest(k,prob)
+            list_prob = prob.tolist()
+            for item_prob in k_prob:
+                cand = [seq + [[list_prob.index(item_prob) + 1]], score * item_prob, i]
+                cands.append(cand)
+        seq_scores = heapq.nlargest(k, cands, lambda d: d[1])
+    for i in range(len(seq_scores)):
+        res = []
+        for item in seq_scores[i][0]:
+            if dict_reverse[item[0]] != '\n' and dict_reverse[item[0]] != '\t':
+                res.append(dict_reverse[item[0]])
+        resList.append("".join(res))
+    return resList
+
 def predict_ancient(texts):
     # model_path = "model/ancient_poetry_weights_bak.h5"
     model_path = "model/ancient_poetry_weights.h5"
@@ -70,12 +106,14 @@ def predict_ancient(texts):
         decoder_infer = net_model.decoder_infer(model_train,encoder_infer)
         # decoder_infer = net_model.decoder_infer(model_train)
     encoder_input = pre_data_utils.gen_sequence_without_onehot([texts], dict, INUPT_LENGTH)
-    out = predict_chinese(encoder_input, encoder_infer, decoder_infer, OUTPUT_LENGTH, vocab_size)
+    # out = predict_chinese(encoder_input, encoder_infer, decoder_infer, OUTPUT_LENGTH, vocab_size)
+    out = infer_beam_search(encoder_input, encoder_infer, decoder_infer, OUTPUT_LENGTH)
     return out;
 
 if __name__ == '__main__':
-    texts = "每时每刻"
+    texts = "相思相遇"
     out = predict_ancient(texts)
     print(texts)
-    print(out)
+    for item in out:
+        print(item)
 
